@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FS2024 Live Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background: #1a1a1a; }
+        #map { height: 85vh; width: 100%; }
+        .stats { display: flex; gap: 20px; font-family: 'Segoe UI', sans-serif; padding: 15px; background: #222; color: white; align-items: center; }
+        .val { font-weight: bold; color: #00ff00; font-family: monospace; font-size: 1.2em; }
+        #recenterBtn { 
+            padding: 8px 15px; cursor: pointer; border-radius: 5px; border: none;
+            background: #444; color: white; font-weight: bold; transition: 0.3s;
+        }
+        #recenterBtn.active { background: #0078ff; }
+    </style>
+</head>
+<body>
+
+    <div class="stats">
+        <button id="recenterBtn" class="active">Follow Plane: ON</button>
+        <div>SPD: <span id="spd" class="val">0</span> kn</div>
+        <div>HDG: <span id="hdg" class="val">0</span>°</div>
+        <div>ALT: <span id="alt" class="val">0</span> ft</div>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        let followPlane = true;
+        let currentPos = [0, 0];
+
+        const map = L.map('map').setView([0, 0], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        
+        // Use local static file
+        const planeIcon = L.divIcon({
+            className: 'plane-wrapper',
+            html: '<img id="plane" src="http://localhost:5000/static/plane.png" style="width: 35px; height: 35px; transition: transform 0.2s linear;">',
+            iconSize: [35, 35],
+            iconAnchor: [17, 17]
+        });
+        const marker = L.marker([0, 0], {icon: planeIcon}).addTo(map);
+
+        const landingLine = L.polyline([], {color: 'red', weight: 2, opacity: 0.6, dashArray: '5, 10'}).addTo(map);
+
+        // UI Logic
+        const btn = document.getElementById('recenterBtn');
+        btn.onclick = () => {
+            followPlane = !followPlane;
+            updateButtonUI();
+            if(followPlane) map.panTo(currentPos);
+        };
+
+        // If user drags the map, stop following automatically
+        map.on('dragstart', () => {
+            followPlane = false;
+            updateButtonUI();
+        });
+
+        function updateButtonUI() {
+            btn.innerText = followPlane ? "Follow Plane: ON" : "Follow Plane: OFF";
+            btn.className = followPlane ? "active" : "";
+        }
+
+        const socket = io('http://localhost:5000');
+        socket.on('telemetry', (data) => {
+            const { lat, lon, heading, airspeed, alt } = data;
+            currentPos = [lat, lon];
+
+            marker.setLatLng(currentPos);
+            if (followPlane) map.panTo(currentPos);
+
+            // Rotate Icon (Assumes image points North/Up by default)
+            const planeImg = document.getElementById('plane');
+            if (planeImg) planeImg.style.transform = `rotate(${heading}deg)`;
+
+            // Landing Line (Forward projection)
+            if (alt < 25000) {
+                const headRad = heading * (Math.PI / 180);
+                const offset = 0.115; // length of line
+                const targetPos = [
+                    lat + Math.cos(headRad) * offset,
+                    lon + Math.sin(headRad) * offset
+                ];
+                landingLine.setLatLngs([currentPos, targetPos]);
+            } else {
+                landingLine.setLatLngs([]);
+            }
+
+            document.getElementById('spd').innerText = Math.round(airspeed);
+            document.getElementById('hdg').innerText = Math.round(heading);
+            document.getElementById('alt').innerText = Math.round(alt);
+        });
+    </script>
+</body>
+</html>
